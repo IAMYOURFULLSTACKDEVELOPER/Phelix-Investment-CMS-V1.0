@@ -1,0 +1,6 @@
+-- ============================================================================
+-- Migration: Add Audit Log System
+-- This adds the audit_logs table and related functions for system monitoring
+-- Note: This migration is now replaced by the enhanced version in 05_audit_log_enhancements.sql
+-- Please use 05_audit_log_enhancements.sql instead for the complete implementation
+-- ============================================================================

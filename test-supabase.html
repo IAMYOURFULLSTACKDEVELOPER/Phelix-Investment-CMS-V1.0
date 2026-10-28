@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supabase Connection Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Supabase Connection Test</h1>
+    <div id="result"></div>
+    
+    <script>
+        const SUPABASE_URL = 'https://utlgnmmksguhvnajsuom.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV0bGdubW1rc2d1aHZuYWpzdW9tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgzOTEzNDAsImV4cCI6MjEwMzk2NzM0MH0.or7sDNjwHmN0P5Z4OZ1zbdLUXr13VU5RUQnIO75k69Q';
+        
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const resultDiv = document.getElementById('result');
+        
+        async function testConnection() {
+            resultDiv.innerHTML = '<p>Testing connection...</p>';
+            
+            try {
+                // Test basic connection with a simpler query
+                const { data, error } = await supabase.from('profiles').select('*').limit(1);
+                
+                if (error) {
+                    resultDiv.innerHTML = `<p style="color: red;">Connection failed: ${error.message}</p>`;
+                    console.error('Supabase error:', error);
+                    
+                    // Additional diagnostic info
+                    if (error.message.includes('fetch') || error.message.includes('network')) {
+                        resultDiv.innerHTML += '<p style="color: orange;">This appears to be a network/DNS issue. Check your Supabase URL in the .env file.</p>';
+                    }
+                } else {
+                    resultDiv.innerHTML = '<p style="color: green;">Connection successful!</p>';
+                    console.log('Supabase data:', data);
+                }
+            } catch (err) {
+                resultDiv.innerHTML = `<p style="color: red;">Exception: ${err.message}</p>`;
+                console.error('Exception:', err);
+                
+                // Check if it's a network error
+                if (err.message.includes('fetch') || err.message.includes('network') || err.message.includes('ENOTFOUND')) {
+                    resultDiv.innerHTML += '<p style="color: orange;">Network/DNS error detected. Your Supabase URL may be incorrect or inaccessible.</p>';
+                }
+            }
+        }
+        
+        // Test signup
+        async function testSignup() {
+            resultDiv.innerHTML = '<p>Testing signup...</p>';
+            
+            try {
+                const { data, error } = await supabase.auth.signUp({
+                    email: 'test@example.com',
+                    password: 'test123456',
+                    options: {
+                        data: {
+                            full_name: 'Test User',
+                            role: 'fuel_attendant'
+                        }
+                    }
+                });
+                
+                if (error) {
+                    resultDiv.innerHTML = `<p style="color: red;">Signup failed: ${error.message}</p>`;
+                    console.error('Signup error:', error);
+                } else {
+                    resultDiv.innerHTML = `<p style="color: green;">Signup successful! Check console for details.</p>`;
+                    console.log('Signup data:', data);
+                }
+            } catch (err) {
+                resultDiv.innerHTML = `<p style="color: red;">Exception: ${err.message}</p>`;
+                console.error('Exception:', err);
+            }
+        }
+        
+        testConnection();
+    </script>
+    
+    <button onclick="testConnection()">Test Connection Again</button>
+    <button onclick="testSignup()">Test Signup</button>
+</body>
+</html>
