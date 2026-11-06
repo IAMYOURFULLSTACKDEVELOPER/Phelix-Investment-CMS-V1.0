@@ -2,6 +2,9 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "phelix-investment-cms-v1-0",
   "compatibility_date": "2025-11-01",
+  "observability": {
+    "enabled": false
+  },
   "build": {
     "command": "npm run build"
   },
