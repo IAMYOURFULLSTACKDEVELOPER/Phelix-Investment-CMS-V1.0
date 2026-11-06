@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '../../lib/supabaseClient'
-import type { EvacuationRecord } from '../../types'
-import { Edit, RotateCcw, Search, Calendar } from 'lucide-react'
+import { USAGE_STATUS_TYPES, type EvacuationRecord } from '../../types'
+import { exportEvacuationsToExcel, type EvacuationExportData } from '../../lib/excelExport'
+import { Edit, RotateCcw, Search, Download } from 'lucide-react'
 
 export default function EvacuationsDone() {
   const { profile } = useAuth()
@@ -114,6 +115,36 @@ export default function EvacuationsDone() {
     record.shipping_line?.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
+  function handleExportToExcel() {
+    const exportData: EvacuationExportData[] = records.map((record) => ({
+      container_number: record.container_number,
+      container_weight: record.container_weight,
+      usage_status_type: record.usage_status_type,
+      truck_driver_name: record.truck_driver_name,
+      truck_license_plate: record.truck_license_plate,
+      delivered_at: record.delivered_at,
+      gate_out_time: record.gate_out_time,
+      shipping_line: record.shipping_line,
+      export_receipt_number: record.export_receipt_number,
+      booking_number: record.booking_number,
+      barcode_number: record.barcode_number,
+      remarks: record.remarks,
+      terminal_clerk_name: record.terminal_clerk_name,
+      clerk_name: record.clerk_name,
+      truck_driver_signature: record.truck_driver_signature,
+      customs_signature: record.customs_signature,
+      condition_statement: record.condition_statement,
+      officer_name: profile?.full_name || 'Unknown',
+      officer_email: profile?.email || 'N/A',
+      processed_at: record.processed_at,
+      payment_status: (record as any).payment_status || null,
+      payment_date: (record as any).payment_date || null,
+      payment_notes: (record as any).payment_notes || null,
+    }))
+
+    exportEvacuationsToExcel(exportData, 'my_evacuations')
+  }
+
   if (loading) {
     return (
       <div className="p-8">
@@ -131,15 +162,25 @@ export default function EvacuationsDone() {
         </div>
 
         <div className="mb-6">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
-            <input
-              type="text"
-              placeholder="Search by container number, license plate, or shipping line..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2 text-sm outline-none focus:ring-2 focus:ring-phelix-accent transition-all"
-            />
+          <div className="flex gap-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
+              <input
+                type="text"
+                placeholder="Search by container number, license plate, or shipping line..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2 text-sm outline-none focus:ring-2 focus:ring-phelix-accent transition-all"
+              />
+            </div>
+            <button
+              onClick={handleExportToExcel}
+              disabled={records.length === 0}
+              className="bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Export to Excel
+            </button>
           </div>
         </div>
 
@@ -169,12 +210,18 @@ export default function EvacuationsDone() {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700 block mb-2">Usage/Status/Type</label>
-                  <input
-                    type="text"
+                  <select
                     value={editFormData.usage_status_type || ''}
                     onChange={(e) => setEditFormData({ ...editFormData, usage_status_type: e.target.value })}
                     className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-phelix-accent"
-                  />
+                  >
+                    <option value="">Select Usage/Status/Type</option>
+                    {USAGE_STATUS_TYPES.map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700 block mb-2">Truck Driver Name</label>
@@ -198,7 +245,9 @@ export default function EvacuationsDone() {
                   <label className="text-sm font-medium text-gray-700 block mb-2">Shipping Line</label>
                   <select
                     value={editFormData.shipping_line || ''}
-                    onChange={(e) => setEditFormData({ ...editFormData, shipping_line: e.target.value })}
+                    onChange={(e) =>
+                      setEditFormData({ ...editFormData, shipping_line: (e.target.value || null) as EvacuationRecord['shipping_line'] })
+                    }
                     className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-phelix-accent"
                   >
                     <option value="">Select Shipping Line</option>
@@ -237,13 +286,14 @@ export default function EvacuationsDone() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">License Plate</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shipping Line</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment Status</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-500">
+                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-gray-500">
                     No evacuation records found
                   </td>
                 </tr>
@@ -265,6 +315,17 @@ export default function EvacuationsDone() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{new Date(record.processed_at).toLocaleDateString()}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        (record as any).payment_status === 'paid' 
+                          ? 'bg-green-100 text-green-800' 
+                          : (record as any).payment_status === 'not_paid'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {(record as any).payment_status === 'paid' ? 'PAID' : (record as any).payment_status === 'not_paid' ? 'NOT PAID' : 'PENDING'}
+                      </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex gap-2">

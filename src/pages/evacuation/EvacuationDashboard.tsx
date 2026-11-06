@@ -1,35 +1,89 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabaseClient'
-import type { EvacuationRecord, EvacuationNotification } from '../../types'
+import { useLiveTables } from '../../lib/realtime'
+import { SHIPPING_LINES, type EvacuationRecord, type EvacuationNotification } from '../../types'
+import { exportEvacuationsToExcel, type EvacuationExportData } from '../../lib/excelExport'
+import { Download } from 'lucide-react'
+
+interface Statistics {
+  total_evacuations: number
+  today_evacuations: number
+  week_evacuations: number
+  month_evacuations: number
+  active_officers: number
+  total_weight: number
+  unique_containers: number
+}
+
+interface ActiveOfficer {
+  officer_id: string
+  officer_name: string
+  officer_email: string
+  today_evacuations: number
+  total_evacuations: number
+  last_evacuation_time: string | null
+  last_seen_at: string
+}
+
+interface ShippingLineStats {
+  shipping_line: string
+  total_evacuations: number
+  today_evacuations: number
+  week_evacuations: number
+  month_evacuations: number
+  total_weight: number
+  today_quota: number | null
+  today_remaining: number | null
+}
+
+const LINE_LABEL = Object.fromEntries(SHIPPING_LINES.map((l) => [l.value, l.label])) as Record<string, string>
 
 export default function EvacuationDashboard() {
   const [evacuations, setEvacuations] = useState<EvacuationRecord[]>([])
   const [notifications, setNotifications] = useState<EvacuationNotification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [selectedRecord, setSelectedRecord] = useState<EvacuationRecord | null>(null)
   const [filterOfficer, setFilterOfficer] = useState<string>('all')
   const [filterDate, setFilterDate] = useState<string>('')
 
-  useEffect(() => {
-    loadEvacuations()
-    loadNotifications()
-    
-    // Set up real-time subscription for new evacuations
-    const subscription = supabase
-      .channel('evacuation_changes')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'evacuation_records' }, (payload) => {
-        setEvacuations(prev => [payload.new as EvacuationRecord, ...prev])
-        loadNotifications()
-      })
-      .subscribe()
-
-    return () => {
-      subscription.unsubscribe()
+  // Get comprehensive statistics
+  const statistics = useQuery({
+    queryKey: ['evacuation_statistics'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_evacuation_statistics')
+      if (error) throw error
+      return data as Statistics[]
     }
-  }, [])
+  })
 
-  async function loadEvacuations() {
+  // Get active officers
+  const activeOfficers = useQuery({
+    queryKey: ['active_officers'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_active_officers')
+      if (error) throw error
+      return data as ActiveOfficer[]
+    },
+    refetchInterval: 30_000
+  })
+
+  // Get shipping line statistics
+  const shippingLineStats = useQuery({
+    queryKey: ['shipping_line_stats'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_evacuation_by_shipping_line')
+      if (error) throw error
+      return data as ShippingLineStats[]
+    }
+  })
+
+  useLiveTables(
+    ['evacuation_records', 'evacuation_quotas', 'profiles'],
+    [['evacuation_statistics'], ['active_officers'], ['shipping_line_stats']]
+  )
+
+  const loadEvacuations = useCallback(async () => {
     setLoading(true)
     try {
       let query = supabase
@@ -37,8 +91,7 @@ export default function EvacuationDashboard() {
         .select(`
           *,
           profiles!evacuation_records_processed_by_fkey (
-            full_name,
-            email
+            full_name
           )
         `)
         .order('processed_at', { ascending: false })
@@ -64,9 +117,9 @@ export default function EvacuationDashboard() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [filterOfficer, filterDate])
 
-  async function loadNotifications() {
+  const loadNotifications = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('evacuation_notifications')
@@ -84,7 +137,7 @@ export default function EvacuationDashboard() {
     } catch (err) {
       console.error('Load notifications error:', err)
     }
-  }
+  }, [])
 
   async function markAsRead(notificationId: string) {
     try {
@@ -119,7 +172,7 @@ export default function EvacuationDashboard() {
         return
       }
 
-      setNotifications(prev => 
+      setNotifications(prev =>
         prev.map(n => ({ ...n, is_read: true, read_at: new Date().toISOString() }))
       )
       setUnreadCount(0)
@@ -127,6 +180,42 @@ export default function EvacuationDashboard() {
       console.error('Mark all as read error:', err)
     }
   }
+
+  useEffect(() => {
+    loadEvacuations()
+    loadNotifications()
+
+    // Set up real-time subscription for new evacuations
+    const subscription = supabase
+      .channel('evacuation_changes')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'evacuation_records' }, (payload) => {
+        console.log('New evacuation record received:', payload.new)
+        setEvacuations(prev => [payload.new as EvacuationRecord, ...prev])
+        loadNotifications()
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'evacuation_records' }, (payload) => {
+        console.log('Evacuation record updated:', payload.new)
+        setEvacuations(prev =>
+          prev.map(record => record.id === payload.new.id ? payload.new as EvacuationRecord : record)
+        )
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('Successfully subscribed to evacuation changes')
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('Failed to subscribe to evacuation changes')
+        }
+      })
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [loadEvacuations, loadNotifications])
+
+  // Reload evacuations when filters change
+  useEffect(() => {
+    loadEvacuations()
+  }, [filterOfficer, filterDate, loadEvacuations])
 
   function handlePrint(record: EvacuationRecord) {
     const printContent = window.open('', '_blank')
@@ -264,8 +353,6 @@ export default function EvacuationDashboard() {
     URL.revokeObjectURL(url)
   }
 
-  // Get unique officers for filter
-  const officers = Array.from(new Set(evacuations.map(e => e.processed_by)))
   const officerRecords = evacuations.reduce((acc, record) => {
     if (!acc[record.processed_by]) {
       acc[record.processed_by] = {
@@ -277,6 +364,37 @@ export default function EvacuationDashboard() {
     return acc
   }, {} as Record<string, { name: string; count: number }>)
 
+  // Export to Excel function
+  function handleExportToExcel() {
+    const exportData: EvacuationExportData[] = evacuations.map((record) => ({
+      container_number: record.container_number,
+      container_weight: record.container_weight,
+      usage_status_type: record.usage_status_type,
+      truck_driver_name: record.truck_driver_name,
+      truck_license_plate: record.truck_license_plate,
+      delivered_at: record.delivered_at,
+      gate_out_time: record.gate_out_time,
+      shipping_line: record.shipping_line,
+      export_receipt_number: record.export_receipt_number,
+      booking_number: record.booking_number,
+      barcode_number: record.barcode_number,
+      remarks: record.remarks,
+      terminal_clerk_name: record.terminal_clerk_name,
+      clerk_name: record.clerk_name,
+      truck_driver_signature: record.truck_driver_signature,
+      customs_signature: record.customs_signature,
+      condition_statement: record.condition_statement,
+      officer_name: (record as any).profiles?.full_name || 'Unknown',
+      officer_email: (record as any).profiles?.email || 'N/A',
+      processed_at: record.processed_at,
+      payment_status: (record as any).payment_status || null,
+      payment_date: (record as any).payment_date || null,
+      payment_notes: (record as any).payment_notes || null,
+    }))
+
+    exportEvacuationsToExcel(exportData, 'evacuation_records')
+  }
+
   return (
     <div className="p-8">
       <div className="max-w-7xl mx-auto">
@@ -286,6 +404,14 @@ export default function EvacuationDashboard() {
             <p className="text-sm text-ink/60">Monitor all evacuation operations across the system</p>
           </div>
           <div className="flex items-center gap-4">
+            <button
+              onClick={handleExportToExcel}
+              disabled={evacuations.length === 0}
+              className="bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Export to Excel
+            </button>
             <button
               onClick={markAllAsRead}
               disabled={unreadCount === 0}
@@ -332,29 +458,49 @@ export default function EvacuationDashboard() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-sm text-ink/60">Total Evacuations</p>
-            <p className="text-2xl font-semibold text-ink">{evacuations.length}</p>
+            <p className="text-2xl font-semibold text-ink">
+              {statistics.data?.[0]?.total_evacuations || 0}
+            </p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-sm text-ink/60">Today</p>
             <p className="text-2xl font-semibold text-ink">
-              {evacuations.filter(e => 
-                new Date(e.delivered_at).toDateString() === new Date().toDateString()
-              ).length}
+              {statistics.data?.[0]?.today_evacuations || 0}
             </p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-sm text-ink/60">This Week</p>
             <p className="text-2xl font-semibold text-ink">
-              {evacuations.filter(e => {
-                const weekAgo = new Date()
-                weekAgo.setDate(weekAgo.getDate() - 7)
-                return new Date(e.delivered_at) >= weekAgo
-              }).length}
+              {statistics.data?.[0]?.week_evacuations || 0}
             </p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <p className="text-sm text-ink/60">Active Officers</p>
-            <p className="text-2xl font-semibold text-ink">{Object.keys(officerRecords).length}</p>
+            <p className="text-sm text-ink/60">Active Officers (online now)</p>
+            <p className="text-2xl font-semibold text-ink">
+              {statistics.data?.[0]?.active_officers || 0}
+            </p>
+          </div>
+        </div>
+
+        {/* Additional Statistics */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-sm text-ink/60">This Month</p>
+            <p className="text-2xl font-semibold text-ink">
+              {statistics.data?.[0]?.month_evacuations || 0}
+            </p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-sm text-ink/60">Total Weight of Containers Processed</p>
+            <p className="text-2xl font-semibold text-ink">
+              {Number(statistics.data?.[0]?.total_weight || 0).toLocaleString()} kg
+            </p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-sm text-ink/60">Unique Containers</p>
+            <p className="text-2xl font-semibold text-ink">
+              {statistics.data?.[0]?.unique_containers || 0}
+            </p>
           </div>
         </div>
 
@@ -394,6 +540,86 @@ export default function EvacuationDashboard() {
           </div>
         </div>
 
+        {/* Active Officers Section */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+          <h3 className="text-lg font-semibold text-ink mb-1">Currently Active Evacuation Officers</h3>
+          <p className="text-xs text-ink/50 mb-4">Officers signed in to the system within the last 3 minutes</p>
+          {activeOfficers.isLoading ? (
+            <div className="text-center text-sm text-ink/60">Loading active officers...</div>
+          ) : activeOfficers.data && activeOfficers.data.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {activeOfficers.data.map((officer) => (
+                <div key={officer.officer_id} className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-medium text-ink">{officer.officer_name}</p>
+                    <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">Active</span>
+                  </div>
+                  <p className="text-sm text-ink/60 mb-2">{officer.officer_email}</p>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-ink/80">Today: <strong>{officer.today_evacuations}</strong></span>
+                    <span className="text-ink/80">Total: <strong>{officer.total_evacuations}</strong></span>
+                  </div>
+                  <p className="text-xs text-ink/40 mt-2">
+                    Last evacuation:{' '}
+                    {officer.last_evacuation_time ? new Date(officer.last_evacuation_time).toLocaleString() : 'none yet'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center text-sm text-ink/60">No evacuation officers are signed in right now</div>
+          )}
+        </div>
+
+        {/* Shipping Line Statistics */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+          <h3 className="text-lg font-semibold text-ink mb-4">Evacuations by Shipping Line</h3>
+          {shippingLineStats.isLoading ? (
+            <div className="text-center text-sm text-ink/60">Loading shipping line statistics...</div>
+          ) : shippingLineStats.error ? (
+            <div className="text-center text-sm text-red-600">{(shippingLineStats.error as Error).message}</div>
+          ) : shippingLineStats.data && shippingLineStats.data.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-ink/60 uppercase">Shipping Line</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-ink/60 uppercase">Evacuations Done</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-ink/60 uppercase">Today</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-ink/60 uppercase">This Week</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-ink/60 uppercase">This Month</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-ink/60 uppercase">Today's Quota</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-ink/60 uppercase">Remaining Today</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {shippingLineStats.data.map((stat) => (
+                    <tr key={stat.shipping_line} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-medium text-ink">{LINE_LABEL[stat.shipping_line] ?? stat.shipping_line}</td>
+                      <td className="px-4 py-3 text-sm text-ink/80">{stat.total_evacuations}</td>
+                      <td className="px-4 py-3 text-sm text-ink/80">{stat.today_evacuations}</td>
+                      <td className="px-4 py-3 text-sm text-ink/80">{stat.week_evacuations}</td>
+                      <td className="px-4 py-3 text-sm text-ink/80">{stat.month_evacuations}</td>
+                      <td className="px-4 py-3 text-sm text-ink/80">{stat.today_quota ?? 'Not set'}</td>
+                      <td className="px-4 py-3 text-sm">
+                        {stat.today_remaining === null ? (
+                          <span className="text-ink/40">—</span>
+                        ) : (
+                          <span className={stat.today_remaining > 0 ? 'text-green-600' : 'text-red-600'}>
+                            {stat.today_remaining}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center text-sm text-ink/60">No shipping line data available</div>
+          )}
+        </div>
+
         {/* Evacuations Table */}
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
           {loading ? (
@@ -406,6 +632,7 @@ export default function EvacuationDashboard() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-ink/60 uppercase">Container</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-ink/60 uppercase">Barcode</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-ink/60 uppercase">Driver</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-ink/60 uppercase">Plate</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-ink/60 uppercase">Weight</th>
@@ -418,7 +645,15 @@ export default function EvacuationDashboard() {
                 <tbody className="divide-y divide-gray-200">
                   {evacuations.map((record) => (
                     <tr key={record.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm font-medium text-ink">{record.container_number}</td>
+                      <td className="px-4 py-3 text-sm font-medium text-ink">
+                        {record.container_number}
+                        {(record.container_type || record.container_size) && (
+                          <span className="block text-xs text-ink/50">
+                            {[record.container_type, record.container_size].filter(Boolean).join(' • ')}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs font-mono text-ink/70">{record.barcode_number || '—'}</td>
                       <td className="px-4 py-3 text-sm text-ink/80">{record.truck_driver_name}</td>
                       <td className="px-4 py-3 text-sm text-ink/80">{record.truck_license_plate}</td>
                       <td className="px-4 py-3 text-sm text-ink/80">{record.container_weight} kg</td>

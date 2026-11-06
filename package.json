@@ -13,11 +13,15 @@
     "@tanstack/react-query": "^5.51.0",
     "@tiptap/react": "^2.6.0",
     "@tiptap/starter-kit": "^2.6.0",
+    "clsx": "^2.1.1",
+    "docx": "^9.15.2",
+    "framer-motion": "^14.7.1",
+    "jsbarcode": "^3.12.3",
+    "lucide-react": "^0.427.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.0",
-    "clsx": "^2.1.1",
-    "lucide-react": "^0.427.0"
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

@@ -2,10 +2,12 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './contexts/AuthContext'
 import type { AppRole } from './types'
 import Login from './pages/Login'
+import PendingApproval from './components/PendingApproval'
 import Shell from './components/layout/Shell'
 import SuperAdminDashboard from './pages/admin/SuperAdminDashboard'
 import AuditLog from './pages/admin/AuditLog'
 import EvacuationQuota from './pages/admin/EvacuationQuota'
+import Verifications from './pages/admin/Verifications'
 import AccountingDashboard from './pages/accounting/AccountingDashboard'
 import PaymentsMade from './pages/accounting/PaymentsMade'
 import OperationsDashboard from './pages/operations/OperationsDashboard'
@@ -38,6 +40,10 @@ export default function App() {
 
   if (loading) return <div className="p-8 text-sm text-ink/60">Loading…</div>
 
+  if (profile && (profile.verification_status ?? 'approved') !== 'approved') {
+    return <PendingApproval />
+  }
+
   return (
     <Routes>
       <Route path="/login" element={profile ? <Navigate to="/" replace /> : <Login />} />
@@ -67,6 +73,14 @@ export default function App() {
           element={
             <RoleGate allow={['super_admin']}>
               <EvacuationQuota />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="admin/verifications"
+          element={
+            <RoleGate allow={['super_admin']}>
+              <Verifications />
             </RoleGate>
           }
         />

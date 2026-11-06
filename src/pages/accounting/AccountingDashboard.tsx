@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabaseClient'
+import { useLiveTables } from '../../lib/realtime'
 import type { AccountingEntry } from '../../types'
 import { PageHeader, Card, Field, inputCls, Table, Stat } from '../../components/ui/Basics'
 
@@ -13,13 +14,15 @@ export default function AccountingDashboard() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('accounting_entries')
-        .select('*')
-        .order('entry_date', { ascending: false })
-        .limit(20)
+        .select('*, profiles!accounting_entries_created_by_fkey(full_name)')
+        .order('created_at', { ascending: false })
+        .limit(50)
       if (error) throw error
-      return data as AccountingEntry[]
+      return data as (AccountingEntry & { profiles: { full_name: string } | null })[]
     }
   })
+
+  useLiveTables(['accounting_entries'], [['accounting_entries'], ['admin_summary'], ['admin_recent_accounting']])
 
   const addEntry = useMutation({
     mutationFn: async () => {
@@ -34,6 +37,7 @@ export default function AccountingDashboard() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['accounting_entries'] })
+      qc.invalidateQueries({ queryKey: ['admin_summary'] })
       setForm({ type: 'expense', category: '', amount: '', description: '' })
     }
   })
@@ -43,8 +47,8 @@ export default function AccountingDashboard() {
     addEntry.mutate()
   }
 
-  const revenue = entries.data?.filter((e) => e.type === 'revenue').reduce((s, e) => s + e.amount, 0) ?? 0
-  const expense = entries.data?.filter((e) => e.type === 'expense').reduce((s, e) => s + e.amount, 0) ?? 0
+  const revenue = entries.data?.filter((e) => e.type === 'revenue').reduce((s, e) => s + Number(e.amount), 0) ?? 0
+  const expense = entries.data?.filter((e) => e.type === 'expense').reduce((s, e) => s + Number(e.amount), 0) ?? 0
 
   return (
     <div>
@@ -109,14 +113,18 @@ export default function AccountingDashboard() {
 
         <Card>
           <h2 className="font-display text-lg mb-4">Recent entries</h2>
-          <Table head={['Date', 'Type', 'Category', 'Amount', 'Description']}>
+          {addEntry.isError && (
+            <p className="text-xs text-red-600 mb-3">{(addEntry.error as Error).message}</p>
+          )}
+          <Table head={['Date', 'Type', 'Category', 'Amount', 'Description', 'Logged by']}>
             {entries.data?.map((e) => (
               <tr key={e.id}>
                 <td className="py-2 pr-4">{e.entry_date}</td>
                 <td className="py-2 pr-4 capitalize">{e.type}</td>
                 <td className="py-2 pr-4">{e.category}</td>
-                <td className="py-2 pr-4">Le {e.amount.toLocaleString()}</td>
+                <td className="py-2 pr-4">Le {Number(e.amount).toLocaleString()}</td>
                 <td className="py-2 pr-4 text-ink/60">{e.description}</td>
+                <td className="py-2 pr-4 text-ink/60">{e.profiles?.full_name ?? '—'}</td>
               </tr>
             ))}
           </Table>

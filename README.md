@@ -23,8 +23,10 @@ Tiptap (rich text, wire in where notes/descriptions need formatting) · Vite
    and its Row-Level Security policies in one pass.
 3. Create Storage buckets are created automatically by the schema script
    (`fuel-evidence`). Confirm they show as **private** in Storage settings.
-4. Create one Supabase Auth user per real staff member (Authentication → Add user).
-5. For each user, insert a matching row into `profiles` with their `role`
+4. **IMPORTANT**: Disable email confirmation in Supabase Dashboard (Authentication → Providers → Email → "Disable email confirmation") or run the SQL command in `supabase/12_verification_system.sql` comments.
+5. Run `supabase/12_verification_system.sql` to enable the manual account approval workflow.
+6. Create one Supabase Auth user per real staff member (Authentication → Add user).
+7. For each user, insert a matching row into `profiles` with their `role`
    (`super_admin`, `accountant`, `operations_supervisor`, or `fuel_attendant`)
    — see `supabase/02_seed_example.sql` for the pattern. **Do this for every
    user before they try to sign in**, since the app reads `profiles` to route
@@ -44,6 +46,17 @@ cp .env.example .env
 npm install
 npm run dev
 ```
+
+## User Verification System
+
+The CMS includes a manual account approval workflow:
+
+- New user accounts are created with "pending" status
+- The Super Admin must approve accounts via the "Verifications" page before users can sign in
+- Rejected accounts are documented with a reason
+- This adds an extra security layer to control who gets access to the system
+
+To enable this system, run `supabase/12_verification_system.sql` in the Supabase SQL Editor.
 
 ## 4. Deploy
 

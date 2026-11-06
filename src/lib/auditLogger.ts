@@ -6,8 +6,8 @@ import { supabase } from './supabaseClient'
  */
 export async function logAction(
   action: string,
-  entityType?: string,
-  entityId?: string,
+  entityType?: string | null,
+  entityId?: string | null,
   details?: Record<string, any>,
   success: boolean = true,
   errorMessage?: string

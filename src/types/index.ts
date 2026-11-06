@@ -12,6 +12,11 @@ export interface Profile {
   role: AppRole
   depot: 'graftons' | 'hastings' | null
   is_active: boolean
+  verification_status: 'pending' | 'approved' | 'rejected'
+  rejection_reason: string | null
+  verified_at: string | null
+  verified_by: string | null
+  last_seen_at?: string | null
 }
 
 export interface AuditLogEntry {
@@ -92,6 +97,22 @@ export interface FuelLog {
   receipt_photo_path: string
 }
 
+export type ShippingLine = 'Grimaldi' | 'CMA CGM' | 'MAERSK LINE' | 'MSC' | 'HAPAG LLYOD'
+
+export const SHIPPING_LINES: { value: ShippingLine; label: string }[] = [
+  { value: 'CMA CGM', label: 'CMA CGM' },
+  { value: 'Grimaldi', label: 'GRIMALDI' },
+  { value: 'MAERSK LINE', label: 'MAERSK LINE' },
+  { value: 'HAPAG LLYOD', label: 'HAPAG LLYOD' },
+  { value: 'MSC', label: 'MSC' }
+]
+
+export const CONTAINER_TYPES = ['Tank', 'FlatTrack', 'OpenTop', 'Reefer', 'HC', 'General'] as const
+export const CONTAINER_SIZES = ['20DV', '40HC', 'LG51', '40DV'] as const
+export const USAGE_STATUS_TYPES = ['Transit', 'Evacuation', 'Export'] as const
+export type ContainerType = (typeof CONTAINER_TYPES)[number]
+export type ContainerSize = (typeof CONTAINER_SIZES)[number]
+
 export interface EvacuationRecord {
   id: string
   container_number: string
@@ -101,7 +122,7 @@ export interface EvacuationRecord {
   truck_license_plate: string
   delivered_at: string
   gate_out_time: string | null
-  shipping_line: 'Grimaldi' | 'CMA CGM' | 'MAERSK LINE' | 'MSC' | 'HAPAG LLYOD' | null
+  shipping_line: ShippingLine | null
   export_receipt_number: string | null
   booking_number: string | null
   barcode_number: string | null
@@ -117,6 +138,13 @@ export interface EvacuationRecord {
   document_generated_at: string | null
   created_at: string
   updated_at: string
+  payment_status: 'paid' | 'not_paid' | null
+  payment_date: string | null
+  payment_confirmed_by: string | null
+  payment_notes: string | null
+  truck_group_id: string | null
+  container_type: ContainerType | null
+  container_size: ContainerSize | null
 }
 
 export interface EvacuationNotification {
@@ -131,7 +159,8 @@ export interface EvacuationNotification {
 
 export interface EvacuationQuota {
   id: string
-  shipping_line: 'Grimaldi' | 'CMA CGM' | 'MAERSK LINE' | 'MSC' | 'HAPAG LLYOD'
+  shipping_line: ShippingLine
+  quota_date: string
   total_evacuations: number
   current_evacuations: number
   created_at: string
